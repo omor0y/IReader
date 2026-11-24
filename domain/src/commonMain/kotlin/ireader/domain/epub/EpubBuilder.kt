@@ -40,6 +40,21 @@ class EpubBuilder(
     private val httpClient: HttpClient,
     private val fileSystem: FileSystem
 ) {
+
+    // Set per export: true when the chapters are mostly Arabic/Persian/Hebrew
+    // script, so the book is written right-to-left with the right language.
+    private var rtl = false
+
+    private fun htmlOpen(): String =
+        if (rtl) """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" dir="rtl" lang="ar" xml:lang="ar">"""
+        else """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">"""
+
+    private fun detectRtl(chapters: List<EpubChapter>): Boolean {
+        val sample = chapters.take(5).joinToString(" ") { it.content }.take(20000)
+        val rtlChars = sample.count { it in '\u0590'..'\u08FF' }
+        val latin = sample.count { it in 'a'..'z' || it in 'A'..'Z' }
+        return rtlChars > latin
+    }
     
     /**
      * Creates an EPUB file from a book and its chapters
@@ -71,6 +86,7 @@ class EpubBuilder(
             
             // Process chapters (with optional translated content) - includes image download
             val epubChapters = processChapters(chapters, options, translationsMap)
+            rtl = detectRtl(epubChapters)
             
             // Download cover image first to determine actual format
             var coverExtension = "jpg"
@@ -98,7 +114,7 @@ class EpubBuilder(
             }
             
             // Generate metadata
-            val metadata = createMetadata(book)
+            val metadata = createMetadata(book).let { if (rtl) it.copy(language = "ar") else it }
             
             // Create EPUB files
             createSynopsisPage(tempDir, book)
@@ -167,11 +183,18 @@ class EpubBuilder(
         options: ExportOptions,
         translationsMap: Map<Long, ireader.domain.models.entities.TranslatedChapter> = emptyMap()
     ): List<EpubChapter> {
-        val selectedChapters = if (options.selectedChapters.isEmpty()) {
+        // In chapter-number order, and only chapters that were downloaded:
+        // chapters without text would be blank pages.
+        val selectedChapters = (if (options.selectedChapters.isEmpty()) {
             chapters
         } else {
             chapters.filter { it.id in options.selectedChapters }
-        }
+        })
+            .sortedWith(ireader.domain.models.entities.ChapterSorting.ByNumber)
+            .filter { chapter ->
+                chapter.content.joinToString("").length >= 50 ||
+                    (options.useTranslatedContent && translationsMap.containsKey(chapter.id))
+            }
         
         val result = mutableListOf<EpubChapter>()
         
@@ -314,7 +337,7 @@ class EpubBuilder(
             appendLine("  </manifest>")
             
             // Spine section
-            appendLine("  <spine toc=\"ncx\">")
+            appendLine(if (rtl) "  <spine toc=\"ncx\" page-progression-direction=\"rtl\">" else "  <spine toc=\"ncx\">")
             // Cover page must open the reading order so Google Books / Kindle
             // display it as the book cover.
             if (coverEmbedded) {
@@ -375,7 +398,7 @@ class EpubBuilder(
         val navXhtml = buildString {
             appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
             appendLine("""<!DOCTYPE html>""")
-            appendLine("""<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">""")
+            appendLine(htmlOpen())
             appendLine("<head>")
             appendLine("  <meta charset=\"UTF-8\"/>")
             appendLine("  <title>Table of Contents</title>")
@@ -414,7 +437,7 @@ class EpubBuilder(
         val coverXhtml = buildString {
             appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
             appendLine("""<!DOCTYPE html>""")
-            appendLine("""<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">""")
+            appendLine(htmlOpen())
             appendLine("<head>")
             appendLine("  <meta charset=\"UTF-8\"/>")
             appendLine("  <title>Cover</title>")
@@ -439,7 +462,7 @@ class EpubBuilder(
         val synopsisXhtml = buildString {
             appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
             appendLine("""<!DOCTYPE html>""")
-            appendLine("""<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">""")
+            appendLine(htmlOpen())
             appendLine("<head>")
             appendLine("  <meta charset=\"UTF-8\"/>")
             appendLine("  <title>${book.title.escapeXml()}</title>")
@@ -503,7 +526,7 @@ class EpubBuilder(
             val xhtml = buildString {
                 appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
                 appendLine("""<!DOCTYPE html>""")
-                appendLine("""<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">""")
+                appendLine(htmlOpen())
                 appendLine("<head>")
                 appendLine("  <meta charset=\"UTF-8\"/>")
                 appendLine("  <title>${chapter.title.escapeXml()}</title>")
@@ -594,7 +617,16 @@ img {
     display: block;
     margin: 1em auto;
 }
-""".trimIndent()
+""".trimIndent() + (if (rtl) """
+
+body {
+    direction: rtl;
+}
+
+p, p:first-of-type {
+    text-indent: 0;
+}
+""" else "")
         
         fileSystem.sink(baseDir / "OEBPS" / "Styles" / "style.css").buffer().use { it.writeUtf8(css) }
     }
