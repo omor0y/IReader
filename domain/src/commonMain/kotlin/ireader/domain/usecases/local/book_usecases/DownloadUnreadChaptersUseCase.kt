@@ -43,6 +43,7 @@ class DownloadUnreadChaptersUseCase(
         bookIds.forEach { bookId ->
             try {
                 val chapters = localGetChapterUseCase.findChaptersByBookId(bookId)
+                    .sortedWith(ireader.domain.models.entities.ChapterSorting.ByNumber)
                 
                 if (chapters.isEmpty()) {
                     // No chapters available for this book

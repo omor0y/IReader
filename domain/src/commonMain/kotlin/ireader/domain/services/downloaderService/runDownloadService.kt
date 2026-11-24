@@ -116,7 +116,10 @@ suspend fun runDownloadService(
             val sources = extensions.catalogs.filter { it.sourceId in distinctSources }
 
             // Filter chapters that need downloading
+            // Download in chapter-number order (first chapter first), whatever
+            // order the queue or the database returned them in.
             val downloads = chapters
+                .sortedWith(ireader.domain.models.entities.ChapterSorting.ByNumber)
                 .filter { chapter ->
                     val contentText = chapter.content.joinToString("")
                     contentText.isEmpty() || contentText.length < 50

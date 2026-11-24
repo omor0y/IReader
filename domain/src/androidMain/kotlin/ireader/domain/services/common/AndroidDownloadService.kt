@@ -184,7 +184,10 @@ class AndroidDownloadService(
                 return ServiceResult.Success(Unit)
             }
 
-            val savedDownloads = chaptersToDownload.map { (chapter, book) ->
+            // Download in chapter-number order (first chapter first).
+            val savedDownloads = chaptersToDownload
+                .sortedWith(Comparator { a, b -> ireader.domain.models.entities.ChapterSorting.ByNumber.compare(a.first, b.first) })
+                .map { (chapter, book) ->
                 buildSavedDownload(book, chapter)
             }
 
@@ -227,7 +230,10 @@ class AndroidDownloadService(
                 return ServiceResult.Success(Unit)
             }
 
-            val savedDownloads = chaptersToDownload.map { (chapter, book) ->
+            // Download in chapter-number order (first chapter first).
+            val savedDownloads = chaptersToDownload
+                .sortedWith(Comparator { a, b -> ireader.domain.models.entities.ChapterSorting.ByNumber.compare(a.first, b.first) })
+                .map { (chapter, book) ->
                 buildSavedDownload(book, chapter)
             }
 

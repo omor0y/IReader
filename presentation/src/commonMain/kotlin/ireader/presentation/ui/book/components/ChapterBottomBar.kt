@@ -128,7 +128,14 @@ fun ChapterDetailBottomBar(
                     onClick = {
                         vm.scope.launch {
                             vm.insertUseCases.insertChapters(
-                                vm.chapters.filter { it.id <= (vm.selection.maxOrNull() ?: 0) }
+                                // "Previous" by chapter number, not by database id: ids follow
+                                // the order the source listed the chapters in, which can be
+                                // newest first.
+                                vm.chapters.sortedWith(ireader.domain.models.entities.ChapterSorting.ByNumber)
+                                    .let { ordered ->
+                                        val last = ordered.indexOfLast { it.id in vm.selection }
+                                        if (last < 0) emptyList() else ordered.subList(0, last + 1)
+                                    }
                                     .map { it.copy(read = true) }
                             )
                             vm.selection.clear()
