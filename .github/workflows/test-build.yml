@@ -1,0 +1,83 @@
+name: Test build (preview APK)
+
+on:
+  push:
+    branches:
+      - test-build/preview
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: test-build-preview
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: temurin
+
+      - name: Setup CI gradle properties
+        run: ./.github/scripts/SetupClUnix.sh
+
+      # Keep the same debug signing key between builds so updates install over the old one
+      - name: Restore signing key
+        id: keycache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: ireader-preview-debug-keystore-v1
+
+      - name: Create signing key (first run only)
+        if: steps.keycache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.android
+          keytool -genkeypair -v -keystore ~/.android/debug.keystore \
+            -storepass android -keypass android -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Save signing key
+        if: steps.keycache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: ireader-preview-debug-keystore-v1
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build preview APK
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx5120m -XX:+UseG1GC -XX:MaxMetaspaceSize=768m"
+        run: ./gradlew :android:assembleStandardPreview --stacktrace
+
+      - name: Collect APK
+        run: |
+          ls -R android/build/outputs/apk
+          APK=$(find android/build/outputs/apk -name '*arm64-v8a*.apk' | head -1)
+          if [ -z "$APK" ]; then APK=$(find android/build/outputs/apk -name '*.apk' | head -1); fi
+          echo "Using $APK"
+          cp "$APK" IReader-preview-test.apk
+          ls -l IReader-preview-test.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: preview-test
+          name: IReader preview test build
+          prerelease: true
+          make_latest: false
+          body: |
+            Test build from ${{ github.sha }} (includes upstream chapter source-order fix #301).
+            Package: ir.kazemcodes.infinityreader.preview — installs next to the regular IReader.
+          files: IReader-preview-test.apk
